@@ -14,6 +14,8 @@ namespace FlaskeAutomaten
         private Random rand;
 
         private bool paused;
+        private int interval;
+        private int pauseTimer;
 
         public bool Paused
         {
@@ -22,24 +24,34 @@ namespace FlaskeAutomaten
         }
 
 
-        public BottlesProducer(BottleBuffer buffer)
+        public BottlesProducer(BottleBuffer buffer, int interval, int pauseTimer)
         {
+            this.interval = interval;
+            this.pauseTimer = pauseTimer;
             this.buffer = buffer;
             rand = new Random();
         }
 
-        private string CreateSodaBottle()
+        /// <summary>
+        /// Creates a soda bottle with incremental ID
+        /// </summary>
+        /// <returns></returns>
+        private Bottle CreateSodaBottle()
         {
-            string name = "Soda " + sodaIdCode.ToString();
+            Bottle btl =  new Bottle(Bottletype.Soda, sodaIdCode);
             sodaIdCode++;
-            return name;
+            return btl;
         }
 
-        private string CreateBeerBottle()
+        /// <summary>
+        /// Creates a Beer bottle with incremental ID
+        /// </summary>
+        /// <returns></returns>
+        private Bottle CreateBeerBottle()
         {
-            string name = "Beer " + beerIdCode.ToString();
+            Bottle btl = new Bottle(Bottletype.Beer, beerIdCode);
             beerIdCode++;
-            return name;
+            return btl;
         }
 
         public void StartProducing()
@@ -49,9 +61,13 @@ namespace FlaskeAutomaten
             produceThread.Start();
         }
 
-        private string GetRandomBottle()
+        /// <summary>
+        /// Returns a random (Soda or Beer) bottle.
+        /// </summary>
+        /// <returns></returns>
+        private Bottle GetRandomBottle()
         {
-            string bottle = "";
+            Bottle bottle = null;
 
             if (rand.Next(0, 100) > 50)
             {
@@ -64,24 +80,29 @@ namespace FlaskeAutomaten
 
             return bottle;
         }
+              
 
         private void ProduceThread()
-        {
-            
-            string bottle = "";
+        {         
             int attempts = 0;
+            paused = false;
 
             while (true)
             {
-                paused = false;
-
-                Monitor.Enter(buffer);
+                if (paused)
+                {
+                    Thread.Sleep(pauseTimer);
+                    paused = false;
+                }
 
                 try
                 {
-                    if (buffer.TryInsertProduct(GetRandomBottle()))
+                    Monitor.Enter(buffer);
+                    Bottle btl = GetRandomBottle();
+
+                    if (buffer.TryInsertProduct(btl))
                     {
-                        // Producer inserted a bottle.
+                        // Producer inserted a bottle.                        
                     }
                     else
                     {
@@ -89,37 +110,27 @@ namespace FlaskeAutomaten
 
                         if(attempts > 7)
                         {
-                            Monitor.Pulse(buffer);
-                            Monitor.Exit(buffer);
-
                             paused = true;
-                            Thread.Sleep(3000);
-                            continue;
                         }
                     }
-
-                    Monitor.Pulse(buffer);
-                    Monitor.Exit(buffer);
                 }
                 catch (Exception ex)
                 {
-
-                    throw;
+                    ErrorLogger logger = new ErrorLogger();
+                    logger.LogException(ex);
                 }
                 finally
                 {
-                  
+                    if (Monitor.IsEntered(buffer))
+                    {
+                        Monitor.Pulse(buffer);
+                        Monitor.Exit(buffer);
+                    }
                 }
 
-                Thread.Sleep(500);
-
+                Thread.Sleep(interval);
 
             }
-
-           
-
-
-
         }
     }
 }

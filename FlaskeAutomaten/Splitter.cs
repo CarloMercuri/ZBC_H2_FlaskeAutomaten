@@ -7,15 +7,18 @@ namespace FlaskeAutomaten
 {
     public class Splitter
     {
-        private BottleBuffer generalBuffer;
+        private BottleBuffer producerBuffer;
         private bool paused;
-        private bool generalBufferEmpty;
+        private bool producerHasSoda;
+        private bool producerHasBeer;
         private bool beerBufferFull;
         private bool sodaBufferFull;
-        private BeerBuffer beerBuffer;
-        private SodaBuffer sodaBuffer;
+        private BottleBuffer beerBuffer;
+        private BottleBuffer sodaBuffer;
         private int maxContents;
-        
+        private int interval;
+        private int pauseTimer;
+
 
         public bool Paused
         {
@@ -23,151 +26,199 @@ namespace FlaskeAutomaten
             set { paused = value; }
         }
 
-        private Queue<string> bottles = new Queue<string>();
-        private Queue<string> beerBottles = new Queue<string>();
-        private Queue<string> sodaBottles = new Queue<string>();
 
-        
-
-
-        public Splitter(BottleBuffer buffer, BeerBuffer beerBuffer, SodaBuffer sodaBuffer, int maxContents)
+        public Splitter(BottleBuffer buffer, BottleBuffer beerBuffer, BottleBuffer sodaBuffer, int maxContents, int interval, int pauseTimer)
         {
-            this.generalBuffer = buffer;
+            this.interval = interval;
+            this.pauseTimer = pauseTimer;
+            this.producerBuffer = buffer;
             this.beerBuffer = beerBuffer;
             this.sodaBuffer = sodaBuffer;
             this.maxContents = maxContents;
         }
 
-        public void Initialize()
+        /// <summary>
+        /// Begins the process
+        /// </summary>
+        public void StartSplitting()
         {
-            Thread splitThread = new Thread(new ThreadStart(SplittingThread));
+            Thread splitThread = new Thread(new ThreadStart(SplittingProcess));
             splitThread.Name = "Splitter Thread";
             splitThread.Start();
         }
 
-        public int GetCount()
+        /// <summary>
+        /// Attempts to insert the specified bottle into the Beer buffer
+        /// </summary>
+        /// <param name="bottle"></param>
+        /// <returns></returns>
+        private bool TryInsertInBeer(Bottle bottle)
         {
-            return bottles.Count;
+            bool success = false;
+
+            try
+            {
+                Monitor.Enter(beerBuffer);
+
+                if (beerBuffer.TryInsertProduct(bottle))
+                {
+                    success = true;
+                }
+                else
+                {
+                    success = false;
+                }
+
+                return success;
+            }
+            catch (Exception ex)
+            {
+                ErrorLogger logger = new ErrorLogger();
+                logger.LogException(ex);
+                return success; // error might have happened after we inserted one successfully
+            }
+            finally
+            {
+                if (Monitor.IsEntered(beerBuffer))
+                {
+                    Monitor.Pulse(beerBuffer);
+                    Monitor.Exit(beerBuffer);
+                }
+            }
+            
         }
 
-        private void SplittingThread()
+        /// <summary>
+        /// Attempts to insert the specified bottle into the Soda buffer
+        /// </summary>
+        /// <param name="bottle"></param>
+        /// <returns></returns>
+        private bool TryInsertInSoda(Bottle bottle)
         {
-            int generalAttempts = 0;
-            int sodaAttempts = 0;
-            int beerAttempts = 0;
+            bool success = false;
 
+            try
+            {
+                Monitor.Enter(sodaBuffer);
+
+                if (sodaBuffer.TryInsertProduct(bottle))
+                {
+                    success = true;
+                }
+                else
+                {
+                    success = false;
+                }
+
+                return success;
+            }
+            catch (Exception ex)
+            {
+                ErrorLogger logger = new ErrorLogger();
+                logger.LogException(ex);
+                return success; // error might have happened after we inserted one successfully
+            }
+            finally
+            {
+                if (Monitor.IsEntered(sodaBuffer))
+                {
+                    Monitor.Pulse(sodaBuffer);
+                    Monitor.Exit(sodaBuffer);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Attempts to retreive the specified bottle type from the producer
+        /// </summary>
+        /// <param name="type"></param>
+        /// <param name="bottle"></param>
+        /// <returns></returns>
+        private bool TryGetFromProducer(Bottletype type, out Bottle bottle)
+        {
+            bool success = false;
+            bottle = null;
+            try
+            {
+                Monitor.Enter(producerBuffer);
+
+                if (producerBuffer.TryGetBottleType(type, out bottle))
+                {
+                    success = true;
+                }
+
+                return success;
+            }
+            catch (Exception ex)
+            {
+                ErrorLogger logger = new ErrorLogger();
+                logger.LogException(ex);
+                return success;
+            }
+            finally
+            {
+                if (Monitor.IsEntered(producerBuffer))
+                {
+                    Monitor.Pulse(producerBuffer);
+                    Monitor.Exit(producerBuffer);
+                }
+            }
+        }
+
+        private void SplittingProcess()
+        {
             paused = false;
 
             while (true)
             {
                 if (paused)
                 {
-                    Thread.Sleep(3000);
+                    Thread.Sleep(pauseTimer);
                     paused = false;
                 }
-                
-                try
+
+                sodaBufferFull = false;
+                beerBufferFull = false;
+
+                // Try get a beer bottle from producer. If it finds out, attempt to place it in the 
+                // right buffer.
+
+                if(TryGetFromProducer(Bottletype.Beer, out Bottle beerBottle))
                 {
-                    if(beerBottles.Count < maxContents)
+                    beerBufferFull = beerBuffer.IsFull();
+
+                    if (!beerBufferFull)
                     {
-                        Monitor.Enter(generalBuffer);
-
-                        if (generalBuffer.TryGetProduct(out string Bottle))
-                        {
-                            if (Bottle.ToLower().Contains("soda"))
-                            {
-                                sodaBottles.Enqueue(Bottle);
-                            }
-                            else
-                            {
-                                beerBottles.Enqueue(Bottle);
-                            }
-                            
-                        }
-                        else
-                        {
-                            generalAttempts++;
-
-                            if (generalAttempts > 7)
-                            {
-                                generalBufferEmpty = true;
-                                generalAttempts = 0;
-                            }
-                        }
-
-                        Monitor.Exit(generalBuffer);
-                        Monitor.Pulse(generalBuffer);
+                        TryInsertInBeer(beerBottle);
                     }
-
-                    if(beerBottles.Count > 0)
-                    {
-                        Monitor.Enter(beerBuffer);
-
-                        if (!beerBuffer.IsFull())
-                        {
-                            beerBufferFull = false;
-                            beerBuffer.TryInsertProduct(beerBottles.Dequeue());
-
-                        }
-                        else
-                        {
-                            beerAttempts++;
-
-                            if (beerAttempts > 7)
-                            {
-                                beerBufferFull = true;
-                                beerAttempts = 0;
-                            }
-                        }
-
-                        Monitor.Exit(beerBuffer);
-                        Monitor.Pulse(beerBuffer);
-                    }
-
-                    if (sodaBottles.Count > 0)
-                    {
-                        Monitor.Enter(sodaBuffer);
-
-                        if (!sodaBuffer.IsFull())
-                        {
-                            sodaBufferFull = false;
-                            sodaBuffer.TryInsertProduct(sodaBottles.Dequeue());
-
-                        }
-                        else
-                        {
-                            sodaAttempts++;
-
-                            if (sodaAttempts > 7)
-                            {
-                                sodaBufferFull = true;
-                                sodaAttempts = 0;
-                            }
-                        }
-
-                        Monitor.Exit(sodaBuffer);
-                        Monitor.Pulse(sodaBuffer);
-                    }
-
-                    
-
-                    if(sodaBufferFull && beerBufferFull && generalBufferEmpty)
-                    {
-                        paused = true;
-                    }
-                    
-                }
-                catch (Exception ex)
-                {
-
 
                 }
 
-                Thread.Sleep(500);
+                // Try get a soda bottle from producer. If it finds out, attempt to place it in the 
+                // right buffer.
 
+                if (TryGetFromProducer(Bottletype.Soda, out Bottle sodaBottle))
+                {
+                    sodaBufferFull = sodaBuffer.IsFull();
+
+                    if (!sodaBufferFull)
+                    {
+                        TryInsertInSoda(sodaBottle);
+                    }
+                }          
+
+                // If both are full, going to standby mode
+                if(sodaBufferFull && beerBufferFull)
+                {
+                    paused = true;                    
+                }
+
+                Thread.Sleep(interval);
 
             }
         }
+
+       
 
 
     }

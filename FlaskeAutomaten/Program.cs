@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading;
 
 namespace FlaskeAutomaten
 {
@@ -6,10 +7,9 @@ namespace FlaskeAutomaten
     {
         static void Main(string[] args)
         {
-
-            GUI gUI = new GUI();
             SystemControl control = new SystemControl();
-            control.Init(gUI);
+            control.Init();
+
 
             Console.ReadKey();
         }

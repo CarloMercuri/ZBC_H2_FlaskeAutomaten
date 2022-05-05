@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -33,13 +34,15 @@ namespace FlaskeAutomaten
 
         // rest
         private SystemControl systemControl;
-        private string[] bottlesBufferContents;
+        private Bottle[] producerBufferContents;
+
+        private Queue<GUIMessage> messageQueue = new Queue<GUIMessage>();
 
         public void InitializeGUI(SystemControl control)
         {
             systemControl = control;
-            Console.SetWindowSize(100, 25);
-            Console.SetBufferSize(100, 25);
+            Console.SetWindowSize(125, 25);
+            Console.SetBufferSize(125, 25);
             Console.CursorVisible = false;
             LockConsole();
 
@@ -101,6 +104,7 @@ namespace FlaskeAutomaten
 
             Thread guiThread = new Thread(new ThreadStart(MainGUILoop));
             guiThread.Start();
+            guiThread.Join();
 
         }
 
@@ -108,7 +112,9 @@ namespace FlaskeAutomaten
         {
             while (true)
             {
+                //
                 // Producer
+                //
 
                 if (systemControl.IsProducerPaused())
                 {
@@ -124,24 +130,36 @@ namespace FlaskeAutomaten
                     Console.Write("  "); // clear
                 }
 
-                bottlesBufferContents = systemControl.GetBottleBufferList();
+                //
+                // Producer buffer contents
+                //
 
-                for (int i = 0; i < bottlesBufferContents.Length; i++)
+                for (int u = 0; u < 12; u++)
                 {
-                    Console.SetCursorPosition(25, 11 - i);
-                    Console.WriteLine(bottlesBufferContents[i]);
+                    Console.SetCursorPosition(30, 11 - u);
+                    Console.Write("        "); // Clear
                 }
 
-                // Splitter count
-                int splitterCount = systemControl.GetSplitterCount();
+                producerBufferContents = systemControl.GetProducerBufferList();
 
-                Console.SetCursorPosition(48, 13);
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                string s = splitterCount.ToString();
-                Console.Write(splitterCount.ToString() + "  ");
-                Console.ForegroundColor = ConsoleColor.White;
+                int y = 0;
 
+                for (int j = 0; j < producerBufferContents.Length; j++)
+                {
+                    if (producerBufferContents[j] != null)
+                    {
+                        Console.SetCursorPosition(30, 11 - y);
+                        Console.Write("        "); // Clear
+                        Console.SetCursorPosition(30, 11 - y);
+                        Console.Write(producerBufferContents[j].ToString());
+                        y++;
+                    }
+                }
+
+                //
                 // Beer count
+                //
+
                 int beerCount = systemControl.GetBeerBufferCount();
 
                 Console.SetCursorPosition(67, 7);
@@ -149,19 +167,24 @@ namespace FlaskeAutomaten
                 Console.Write(beerCount.ToString() + "  ");
                 Console.ForegroundColor = ConsoleColor.White;
 
+                //
                 // Soda count
-                int sodaCount = systemControl.GetBeerBufferCount();
+                //
+
+                int sodaCount = systemControl.GetSodaBufferCount();
 
                 Console.SetCursorPosition(67, 18);
                 Console.ForegroundColor = ConsoleColor.Yellow;
                 Console.Write(sodaCount.ToString() + "  ");
                 Console.ForegroundColor = ConsoleColor.White;
 
+                //
                 // Splitter pause
+                //
 
                 if (systemControl.IsSplitterPaused())
                 {
-                    Console.SetCursorPosition(62, 15);
+                    Console.SetCursorPosition(49, 13);
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.Write("P");
                     Console.ForegroundColor = ConsoleColor.White;
@@ -173,12 +196,40 @@ namespace FlaskeAutomaten
                     Console.Write("  "); // clear
                 }
 
+                //
+                // Print message queue
+                //
+
+                while(messageQueue.TryDequeue(out GUIMessage msg))
+                {
+                    if(msg != null)
+                    {
+                        Console.SetCursorPosition(msg.Location.X, msg.Location.Y);
+                        Console.Write(msg.Message);
+                    }
+                }
+
                 Thread.Sleep(100);
             }
 
 
         }
 
+
+        public void PrintConsumerMessage(Bottletype type, string msg)
+        {
+            msg = msg + "                         ";
+
+            if (type == Bottletype.Soda)
+            {
+                messageQueue.Enqueue(new GUIMessage(new Point(79, 16), msg));
+
+            }
+            else if (type == Bottletype.Beer)
+            {
+                messageQueue.Enqueue(new GUIMessage(new Point(79, 10), msg));
+            }
+        }
 
         /// <summary>
         /// Makes it so you cannot resize or maximize it
